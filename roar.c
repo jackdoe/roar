@@ -125,18 +125,32 @@ void handler( struct inotify_event *event ) {
     }
 
     if (action) {
-        if (e->__to) {
-            from = e->__from;
+        if (e->__to)
             to = e->__to;
+        if (e->__from)
+            from = e->__from;
+
+        if (e->__from) {
             struct item *pair = h_find_by_path(from);
             if (pair) {
                 SAYX(EXIT_FAILURE,"recursive move is not supported yet");
-            }            
+            }
         }
+        /* XXX: hack against renaming .temporary file into the file itself
+            since we are not watching anything that starts with . */
+        if (action == ACTION[A_MOVE]) {
+            if (!e->__from) {
+                action = ACTION[A_MODIFY];
+                from = to;
+                to = NULL;
+            }
+        }
+
         execute(action,(event->mask & (IN_ISDIR | IN_DELETE_SELF)) ? TYPE[T_DIR] : TYPE[T_FILE],from,to);
-        XFREE(e->__from);
-        XFREE(e->__to);
     }
+    XFREE(e->__from);
+    XFREE(e->__to);
+
     if (event->mask & (IN_DELETE_SELF))
         stop_watching(event->wd);
 }
