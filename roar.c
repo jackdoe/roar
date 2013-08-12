@@ -23,11 +23,18 @@ extern int errno;
     E(fmt,##arg);                  \
     exit(rc);                      \
 } while(0)
-#define XFREE(x) do {    \
+
+#define XFREE(x) do {   \
     if ((x))            \
         free((x));      \
     (x) = NULL;         \
-} while (0);
+} while (0)
+
+#define XDUP(x,s) do {                                              \
+    (x) = strdup((s));                                              \
+    if ((x) == NULL)                                                \
+        SAYX(EXIT_FAILURE,"not enough memory to dup %s",(s));       \
+} while (0)
 
 #define SAYPX(fmt,arg...) SAYX(EXIT_FAILURE,fmt " { %s }",##arg,errno ? strerror(errno) : "undefined error");
 
@@ -42,7 +49,7 @@ struct item {
     char *__from;
 };
 
-char *RECEIVER;
+char *RECEIVER = NULL;
 struct item HASH[65535];
 static int INOTIFY;
     
@@ -100,13 +107,13 @@ void handler( struct inotify_event *event ) {
     if (event->mask & IN_MOVED_FROM) {
         /* just ignore the event, wait for moved_to */
         XFREE(e->__from);
-        e->__from = strdup(path);
+        XDUP(e->__from,path);
         D("from: %s ( %s -> %s)",path,e->__from,e->__to);
+        /* do not set action */
 
-        return;
     } else if (event->mask & IN_MOVED_TO) {
         XFREE(e->__to);
-        e->__to = strdup(path);
+        XDUP(e->__to,path);
         D("to: %s ( %s -> %s)",path,e->__from,e->__to);
 
         action = ACTION[A_MOVE];
@@ -115,20 +122,20 @@ void handler( struct inotify_event *event ) {
     } else if (event->mask & (IN_DELETE | IN_DELETE_SELF) ) {
         action = ACTION[A_DELETE];
     }
-
-    if (e->__to) {
-        from = e->__from;
-        to = e->__to;
-        D("WTF %s",from);
-        struct item *pair = h_find_by_path(from);
-        if (pair) {
-            SAYX(EXIT_FAILURE,"recursive move is not supported yet");
-        }            
+    if (action) {
+        if (e->__to) {
+            from = e->__from;
+            to = e->__to;
+            D("WTF %s",from);
+            struct item *pair = h_find_by_path(from);
+            if (pair) {
+                SAYX(EXIT_FAILURE,"recursive move is not supported yet");
+            }            
+        }
+        execute(action,from, to);
+        XFREE(e->__from);
+        XFREE(e->__to);
     }
-    execute(action,from, to);
-    XFREE(e->__from);
-    XFREE(e->__to);
-
     if (event->mask & (IN_DELETE_SELF))
         stop_watching(event->wd);
 }
@@ -144,7 +151,7 @@ int main( int ac, char *av[] ) {
     if ( ac < 3 )
         SAYX(EXIT_FAILURE,"USAGE: %s receiver[example: notify.sh] path1 ..pathN\n", av[0]); 
     h_init();
-    RECEIVER = strdup(av[1]);
+    XDUP(RECEIVER,av[1]);
     INOTIFY = inotify_init();
     for (i = 2; i < ac; i++) {
         if (realpath(av[i],ROOT) != NULL)
@@ -226,9 +233,11 @@ struct item *h_add(int wd, char *path) {
     if (!elem)
         SAYPX("malloc");
     elem->wd = wd;
-    elem->path = strdup(path);
+    elem->path = NULL;
     elem->__from = NULL;
     elem->__to = NULL;
+
+    XDUP(elem->path,path);
     list_add_tail(&elem->list,&bucket->list);
     return elem;
 }
