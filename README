@@ -1,0 +1,18 @@
+* INSTALL
+    $ https://github.com/jackdoe/roar
+    $ cd roar && make
+
+* USAGE
+    $ ./roar ./echo.sh /directory-you-want-to-watch
+
+    it will execute ./echo.sh with arguments:
+        echo.sh ACTION FILE for example:
+    DELETE /tmp/xyz
+    MOVE /tmp/xyz /tmp/xyy
+    MODIFY /tmp/yxz
+
+    MODIFY includes create, attr change, but not MOVE
+
+* CAVEATS
+    directory rename is not supported yet
+
