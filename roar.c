@@ -60,27 +60,28 @@ struct item *h_find_by_path(char *path);
 struct item *h_add(int wd, char *path);
 void h_remove(int wd);
 void h_init(void);
-void execute(char *action, char *from, char *to);
+void execute(char *action,char *type, char *from, char *to);
 void start_watching(char *dir);
 void stop_watching(int wd);
 void watch_recursive(char *root, char *parent);
 
-#define A_MODIFY  0
-#define A_DELETE  1
-#define A_MOVE 2
+#define A_MODIFY    0
+#define A_DELETE    1
+#define A_MOVE      2
+#define T_DIR       0
+#define T_FILE      1
 char *ACTION[] = {
     "MODIFY",
     "DELETE",
     "MOVE"
 };
-
+char *TYPE[] = { "DIRECTORY", "FILE" };
 
 void handler( struct inotify_event *event ) {
     char path[PATH_MAX];
     bzero(path,sizeof(path));
     char *from;
     char *to;
-
     char *action = NULL;
     if ((event->len > 0 && event->name[0] == '.') || event->mask & IN_IGNORED) {
         // D("ignoring %s",event->name);
@@ -122,17 +123,17 @@ void handler( struct inotify_event *event ) {
     } else if (event->mask & (IN_DELETE | IN_DELETE_SELF) ) {
         action = ACTION[A_DELETE];
     }
+
     if (action) {
         if (e->__to) {
             from = e->__from;
             to = e->__to;
-            D("WTF %s",from);
             struct item *pair = h_find_by_path(from);
             if (pair) {
                 SAYX(EXIT_FAILURE,"recursive move is not supported yet");
             }            
         }
-        execute(action,from, to);
+        execute(action,(event->mask & (IN_ISDIR | IN_DELETE_SELF)) ? TYPE[T_DIR] : TYPE[T_FILE],from,to);
         XFREE(e->__from);
         XFREE(e->__to);
     }
@@ -170,15 +171,14 @@ int main( int ac, char *av[] ) {
     XFREE(RECEIVER);
 }
 
-void execute(char *action, char *from, char *to) {
+void execute(char *action,char *type, char *from, char *to) {
     pid_t  pid;
     int status;
-    // D("execute %s %s %s",RECEIVER,action,path);
     if ((pid = fork()) < 0) {
         exit(EXIT_FAILURE);
     }
     else if (pid == 0) {
-        execl(RECEIVER,RECEIVER,action,from,to,NULL);
+        execl(RECEIVER,RECEIVER,action,type,from,to,NULL);
     } else {
         while (wait(&status) != pid)
            ;

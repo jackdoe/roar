@@ -9,10 +9,10 @@
     $ ./roar ./echo.sh /directory-you-want-to-watch
 
     it will execute ./echo.sh with arguments:
-        echo.sh ACTION FILE for example:
-    DELETE /tmp/xyz
-    MOVE /tmp/xyz /tmp/xyy
-    MODIFY /tmp/yxz
+        echo.sh ACTION OBJ_TYPE FILE for example:
+    DELETE FILE /tmp/xyz
+    MOVE FILE /tmp/xyz /tmp/xyy
+    MODIFY DIRECTORY /tmp/yxz
 
     MODIFY includes create, attr change, but not MOVE
 
