@@ -36,6 +36,12 @@ extern int errno;
         SAYX(EXIT_FAILURE,"not enough memory to dup %s",(s));       \
 } while (0)
 
+#define XALLOC(x,len) do {                          \
+    (x) = malloc((len));                            \
+    if ((x) == NULL)                                \
+        SAYPX("malloc failed for %zu bytes",len);   \
+} while(0)
+
 #define SAYPX(fmt,arg...) SAYX(EXIT_FAILURE,fmt " { %s }",##arg,errno ? strerror(errno) : "undefined error");
 
 #define EVENT_LEN ( sizeof( struct inotify_event ) )
@@ -56,14 +62,16 @@ static int INOTIFY;
 inline unsigned int h_key(int wd);
 inline struct item *h_bucket(int wd);
 struct item *h_lookup(int wd);
-struct item *h_find_by_path(char *path);
-struct item *h_add(int wd, char *path);
+
+struct item *h_add(int wd, const char *path);
 void h_remove(int wd);
 void h_init(void);
-void execute(char *action,char *type, char *from, char *to);
-void start_watching(char *dir);
+void execute(const char *action,const char *type, const char *from, const char *to);
+void start_watching(const char *dir);
 void stop_watching(int wd);
-void watch_recursive(char *root, char *parent);
+void watch_recursive(const char *root);
+char *str_replace(char *string, const char *needle, const char *replacement);
+char *prefix_strstr(char *hay, const char *needle);
 
 #define A_MODIFY    0
 #define A_DELETE    1
@@ -80,11 +88,11 @@ char *TYPE[] = { "DIRECTORY", "FILE" };
 void handler( struct inotify_event *event ) {
     char path[PATH_MAX];
     bzero(path,sizeof(path));
-    char *from;
-    char *to;
+    char *from = NULL;
+    char *to = NULL;
     char *action = NULL;
-    if ((event->len > 0 && event->name[0] == '.') || event->mask & IN_IGNORED) {
-        // D("ignoring %s",event->name);
+    if (event->len == 0 || (event->len > 0 && event->name[0] == '.') || event->mask & IN_IGNORED) {
+        D("ignoring %s",event->name);
         return;
     }
 
@@ -96,11 +104,8 @@ void handler( struct inotify_event *event ) {
         return;
     }
 
-    if (event->len > 0) {
-        snprintf(path, sizeof(path), "%s/%s", e->path,event->name);
-        from = path;
-    } else
-        from = e->path;
+    snprintf(path, sizeof(path), "%s/%s", e->path,event->name);
+    from = path;
 
     if ((event->mask & (IN_ISDIR | IN_CREATE)) == (IN_ISDIR | IN_CREATE))
         start_watching(path);
@@ -117,6 +122,18 @@ void handler( struct inotify_event *event ) {
         XDUP(e->__to,path);
         D("to: %s ( %s -> %s)",path,e->__from,e->__to);
 
+        // just rename everthing that matches the prefix
+        int i;
+        struct item *elem;
+        struct list_head *pos;
+        for (i = 0; i < sizeof(HASH)/sizeof(HASH[0]); i++) {
+            list_for_each(pos, &HASH[i].list) {
+                elem = list_entry(pos, struct item, list);
+                if (elem->path)
+                    elem->path = str_replace(elem->path,e->__from,e->__to);
+            }
+        }  
+
         action = ACTION[A_MOVE];
     } else if (event->mask & (IN_ATTRIB | IN_CREATE | IN_MODIFY)) {
         action = ACTION[A_MODIFY];
@@ -130,12 +147,6 @@ void handler( struct inotify_event *event ) {
         if (e->__from)
             from = e->__from;
 
-        if (e->__from) {
-            struct item *pair = h_find_by_path(from);
-            if (pair) {
-                SAYX(EXIT_FAILURE,"recursive move is not supported yet");
-            }
-        }
         /* XXX: hack against renaming .temporary file into the file itself
             since we are not watching anything that starts with . */
         if (action == ACTION[A_MOVE]) {
@@ -145,11 +156,11 @@ void handler( struct inotify_event *event ) {
                 to = NULL;
             }
         }
-
         execute(action,(event->mask & (IN_ISDIR | IN_DELETE_SELF)) ? TYPE[T_DIR] : TYPE[T_FILE],from,to);
+        XFREE(e->__from);
+        XFREE(e->__to);
     }
-    XFREE(e->__from);
-    XFREE(e->__to);
+
 
     if (event->mask & (IN_DELETE_SELF))
         stop_watching(event->wd);
@@ -170,7 +181,7 @@ int main( int ac, char *av[] ) {
     INOTIFY = inotify_init();
     for (i = 2; i < ac; i++) {
         if (realpath(av[i],ROOT) != NULL)
-            watch_recursive(ROOT,NULL);        
+            watch_recursive(ROOT);        
     }
 
     for (;;) {
@@ -185,7 +196,7 @@ int main( int ac, char *av[] ) {
     XFREE(RECEIVER);
 }
 
-void execute(char *action,char *type, char *from, char *to) {
+void execute(const char *action,const char *type, const char *from, const char *to) {
     pid_t  pid;
     int status;
     if ((pid = fork()) < 0) {
@@ -224,32 +235,17 @@ struct item *h_lookup(int wd) {
     return NULL;
 }
 
-struct item *h_find_by_path(char *path) {
-    int i;
-    struct item *elem;
-    struct list_head *pos;
-    for (i = 0; i < sizeof(HASH)/sizeof(HASH[0]); i++) {
-        list_for_each(pos, &HASH[i].list) {
-            elem = list_entry(pos, struct item, list);
-            if (elem->path && strcmp(elem->path,path) == 0)
-                return elem;
-        }
-    }
-    return NULL;    
-}
-
-struct item *h_add(int wd, char *path) {
+struct item *h_add(int wd, const char *path) {
     struct item *elem = h_lookup(wd),*bucket = h_bucket(wd);
     D("adding %s to bucket %d",path,h_key(wd));
     if (elem)
         return elem;
-    elem = malloc(sizeof(*elem));
-    if (!elem)
-        SAYPX("malloc");
-    elem->wd = wd;
-    elem->path = NULL;
+    XALLOC(elem,sizeof(*elem));
+
+    elem->wd     = wd;
+    elem->path   = NULL;
     elem->__from = NULL;
-    elem->__to = NULL;
+    elem->__to   = NULL;
 
     XDUP(elem->path,path);
     list_add_tail(&elem->list,&bucket->list);
@@ -266,7 +262,7 @@ void h_remove(int wd) {
     }
 }
 
-void start_watching(char *dir) {
+void start_watching(const char *dir) {
     int wd = inotify_add_watch(INOTIFY, dir, (IN_ATTRIB | IN_CREATE | IN_MODIFY | IN_DELETE | IN_DELETE_SELF | IN_MOVED_TO | IN_MOVED_FROM | IN_MOVE_SELF));
     h_add(wd,dir);
 }
@@ -276,7 +272,7 @@ void stop_watching(int wd) {
     inotify_rm_watch(INOTIFY,wd);
 }
 
-void watch_recursive(char *root, char *parent) {
+void watch_recursive(const char *root) {
     DIR *dir = opendir(root);
     struct dirent *entry;
     struct stat status;
@@ -294,7 +290,7 @@ void watch_recursive(char *root, char *parent) {
             SAYPX("stat");
 
         if (S_ISDIR(status.st_mode) && !S_ISLNK(status.st_mode) && entry->d_name[0] != '.')
-            watch_recursive(path,root);
+            watch_recursive(path);
 
         entry = readdir(dir);
     }
@@ -302,3 +298,31 @@ void watch_recursive(char *root, char *parent) {
 }
 
 
+char *prefix_strstr(char *hay, const char *needle) {
+    ssize_t l_hay, l_needle;
+    if (!hay || !needle)
+        return NULL;
+
+    l_hay = strlen(hay);
+    l_needle = strlen(needle);
+    if (l_needle > l_hay)
+        return NULL;
+    if (memcmp(hay,needle,l_needle) == 0) {
+        return (hay + l_needle);
+    }
+    return NULL;
+}
+
+char *str_replace(char *string, const char *needle, const char *replacement) {
+    char *p = prefix_strstr(string,needle), *result;
+    if (p) {
+        ssize_t r_len = strlen(replacement), d_len = strlen(p);
+        XALLOC(result,r_len + d_len + 1);
+        memcpy(result,replacement,r_len);
+        memcpy((result + r_len), p, d_len);
+        memset((result + r_len + d_len), 0, 1);
+        XFREE(string);
+        return result;
+    }
+    return string;
+}
