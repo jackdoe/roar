@@ -315,7 +315,7 @@ char *prefix_strstr(char *hay, const char *needle) {
 
 char *str_replace(char *string, const char *needle, const char *replacement) {
     char *p = prefix_strstr(string,needle), *result;
-    if (p) {
+    if (p && (p[0] == '\0' || p[0] == '/')) {
         ssize_t r_len = strlen(replacement), d_len = strlen(p);
         XALLOC(result,r_len + d_len + 1);
         memcpy(result,replacement,r_len);
