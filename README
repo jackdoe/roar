@@ -2,7 +2,7 @@
 
 
 * INSTALL
-    $ https://github.com/jackdoe/roar
+    $ git clone https://github.com/jackdoe/roar
     $ cd roar && make
 
 * USAGE
