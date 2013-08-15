@@ -15,7 +15,3 @@
     MODIFY DIRECTORY /tmp/yxz
 
     MODIFY includes create, attr change, but not MOVE
-
-* CAVEATS
-    directory rename is not supported yet
-
