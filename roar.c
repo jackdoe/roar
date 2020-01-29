@@ -59,8 +59,8 @@ char *RECEIVER = NULL;
 struct item HASH[65535];
 static int INOTIFY;
     
-inline unsigned int h_key(int wd);
-inline struct item *h_bucket(int wd);
+unsigned int h_key(int wd);
+struct item *h_bucket(int wd);
 struct item *h_lookup(int wd);
 
 struct item *h_add(int wd, const char *path);
@@ -216,11 +216,11 @@ void h_init(void) {
         INIT_LIST_HEAD(&HASH[i].list);
 }
 
-inline unsigned int h_key(int wd) {
+unsigned int h_key(int wd) {
     return (wd % (sizeof(HASH)/sizeof(HASH[0])));
 }
 
-inline struct item *h_bucket(int wd) {
+struct item *h_bucket(int wd) {
     return &HASH[h_key(wd)];
 }
 
